@@ -1,0 +1,120 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require 'open-uri'
+require 'json'
+
+# hypothes.is interface
+class Hypothesis
+  # a hypothes.is annotation
+  class Annotation
+    def initialize(text:, comment:, title:, uri:)
+      @text = text
+      @comment = comment.empty? ? nil : comment
+      @title = title
+      @uri = uri
+    end
+
+    def to_markdown
+      str = @text.split("\n").reduce('') { |acc, line| acc + "> #{line}\n" }
+      str += "\n"
+      str += "#{@comment}\n" if @comment
+      str
+    end
+
+    def to_markdown_title_url
+      "[#{@title}](#{@uri})\n"
+    end
+  end
+
+  def initialize
+    %w[HYPOTHESIS_API_KEY HYPOTHESIS_USERNAME].each do |var|
+      die "Please set the #{var} environment variable" if ENV[var].nil?
+    end
+
+    @apikey = ENV['HYPOTHESIS_API_KEY']
+    @username = ENV['HYPOTHESIS_USERNAME']
+    @headers = { 'Host' => 'hypothes.is', 'Accept' => 'application/json', 'Authorization' => "Bearer #{@apikey}" }
+    @baseurl = 'https://hypothes.is/api'
+
+    ping || die("Could not access the API #{@baseurl}")
+  end
+
+  def search_host(host)
+    annotations "wildcard_uri=http://#{host}/*"
+  end
+
+  def search_uri(uri)
+    annotations "uri=#{uri}"
+  end
+
+  private
+
+  def ping
+    URI.open("#{@baseurl}/", @headers)
+    true
+  rescue OpenURI::HTTPError
+    false
+  end
+
+  def die(msg)
+    warn msg
+    exit 1
+  end
+
+  def request(endpoint)
+    URI.open(@baseurl + endpoint, @headers) do |response|
+      JSON.parse(response.read)['rows']
+    end
+  rescue OpenURI::HTTPError
+    warn "Error getting data from #{endpoint}"
+    []
+  end
+
+  def annotations(uri_search_str)
+    data = request "/search?user=acct:#{@username}@hypothes.is&#{uri_search_str}&limit=200&order=asc"
+    data.reduce([]) do |arr, annot|
+      arr << Annotation.new(text: annot['target'].first['selector']
+                                  .select { |f| f['type'] == 'TextQuoteSelector' }.first['exact'],
+                            comment: annot['text'],
+                            title: annot['document']['title'].first,
+                            uri: annot['uri'])
+    end
+  end
+end
+
+def print_usage
+  puts <<~HEREDOC
+    Usage: hpanot [command] [arg1, [arg2...]]
+
+    Commands:
+    site [URL]     get annotations for a website
+
+  HEREDOC
+end
+
+ARGV.each do |opt|
+  case opt
+  when '-h' || '--help'
+    print_usage
+    exit 0
+  end
+end
+
+params = ARGV.reject { |arg| arg.start_with? '-' }
+if params.empty?
+  print_usage
+  exit 1
+end
+
+case params[0]
+when 'site'
+  die 'No website specified, use pass -h to print usage.' unless params[1]
+  h = Hypothesis.new
+  site = params[1]
+  annotations = site.start_with?('http') ? h.search_uri(site) : h.search_host(site)
+  puts annotations.first.to_markdown_title_url + "\n" + annotations.reduce('') { |str, annot| str + annot.to_markdown }
+else
+  print_usage
+  exit 1
+end
