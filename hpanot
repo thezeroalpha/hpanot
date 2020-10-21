@@ -8,6 +8,7 @@ require 'json'
 class Hypothesis
   # a hypothes.is annotation
   class Annotation
+    attr_reader :uri, :title
     def initialize(text:, comment:, title:, uri:)
       @text = text
       @comment = comment.empty? ? nil : comment
@@ -41,11 +42,20 @@ class Hypothesis
   end
 
   def search_host(host)
-    annotations "wildcard_uri=http://#{host}/*"
+    annotations "wildcard_uri=http://#{host}/*&limit=200&order=asc"
   end
 
   def search_uri(uri)
-    annotations "uri=#{uri}"
+    annotations "uri=#{uri}&limit=200&order=asc"
+  end
+
+  def recent_urls(num_urls = 2)
+    # FIXME: this is a very roundabout, inefficient method. Waiting for an API for this from hypothes.is
+    grouped_annotations = annotations('sort=created&order=desc&limit=200').group_by(&:uri)
+    n_recent = grouped_annotations.keys[0, num_urls]
+    n_recent.inject([]) do |arr, uri|
+      arr << { uri: uri, title: grouped_annotations[uri].first.title }
+    end
   end
 
   private
@@ -72,7 +82,7 @@ class Hypothesis
   end
 
   def annotations(uri_search_str)
-    data = request "/search?user=acct:#{@username}@hypothes.is&#{uri_search_str}&limit=200&order=asc"
+    data = request "/search?user=acct:#{@username}@hypothes.is&#{uri_search_str}"
     data.reduce([]) do |arr, annot|
       arr << Annotation.new(text: annot['target'].first['selector']
                                   .select { |f| f['type'] == 'TextQuoteSelector' }.first['exact'],
@@ -88,7 +98,8 @@ def print_usage
     Usage: hpanot [command] [arg1, [arg2...]]
 
     Commands:
-    site [URL]     get annotations for a website
+    site URL      get annotations for a website
+    recent [n]    get n (default 2) most recently annotated websites
 
   HEREDOC
 end
@@ -114,6 +125,14 @@ when 'site'
   site = params[1]
   annotations = site.start_with?('http') ? h.search_uri(site) : h.search_host(site)
   puts annotations.first.to_markdown_title_url + "\n" + annotations.reduce('') { |str, annot| str + annot.to_markdown }
+when 'recent'
+  h = Hypothesis.new
+  begin
+    recent_urls = params[1] ? h.recent_urls(Integer(params[1])) : h.recent_urls
+    recent_urls.each { |u| puts "#{u[:uri]}\t#{u[:title]}" }
+  rescue ArgumentError
+    die 'Argument 2 must be an integer.'
+  end
 else
   print_usage
   exit 1
