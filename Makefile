@@ -13,9 +13,7 @@ all:
 install: hpanot
 	cp hpanot $(bindir)/
 	mkdir -p $(etcdir)
-	cp urls $(etcdir)/
 
 uninstall:
 	rm $(bindir)/hpanot
-	rm $(etcdir)/urls
 	rmdir $(etcdir)
