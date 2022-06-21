@@ -17,7 +17,7 @@ class Hypothesis
     end
 
     def to_markdown
-      str = @text.split("\n").reduce('') { |acc, line| acc + "> #{line}\n" }
+      str = @text.split("\n").reduce('') { |acc, line| acc + "> #{line.gsub(/[‘’]/, %q{'}).gsub(/[“”]/, %q{"})}\n" }
       str += "\n"
       str += "#{@comment}\n" if @comment
       str
